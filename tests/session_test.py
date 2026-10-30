@@ -151,7 +151,7 @@ class TestCheckSessionProxyToolFn:
         ctx.get_state.side_effect = (
             lambda k: True if k == session.FE_CONNECTED_KEY else None
         )
-        assert await session.check_session_proxy_tool_fn(ctx) is True
+        assert await session.check_session_proxy_tool_fn(ctx=ctx) is True
 
     @pytest.mark.asyncio
     async def test_disconnected(self, mock_webbrowser):
@@ -167,11 +167,79 @@ class TestCheckSessionProxyToolFn:
             return None
 
         ctx.get_state.side_effect = get_state
-        assert await session.check_session_proxy_tool_fn(ctx) is False
+        assert await session.check_session_proxy_tool_fn(ctx=ctx) is False
         mock_webbrowser.assert_called_once()
         args, _ = mock_webbrowser.call_args
         assert "mcpProxyToken=test-token" in args[0]
         assert "mcpProxyPort=1234" in args[0]
+
+    @pytest.mark.asyncio
+    async def test_notebook_url(self, mock_webbrowser):
+        ctx = Mock()
+        ctx.get_state.side_effect = lambda k: {
+            session.FE_CONNECTED_KEY: False,
+            session.PROXY_TOKEN_KEY: "test-token",
+            session.PROXY_PORT_KEY: 1234,
+        }.get(k)
+        url = "https://colab.research.google.com/notebooks/my_notebook.ipynb"
+        assert (
+            await session.check_session_proxy_tool_fn(notebook_url=url, ctx=ctx)
+            is False
+        )
+        mock_webbrowser.assert_called_once()
+        opened = mock_webbrowser.call_args[0][0]
+        assert opened.startswith(url)
+        assert "mcpProxyToken=test-token" in opened
+        assert "mcpProxyPort=1234" in opened
+
+    @pytest.mark.asyncio
+    async def test_notebook_url_strips_fragment(self, mock_webbrowser):
+        ctx = Mock()
+        ctx.get_state.side_effect = lambda k: {
+            session.FE_CONNECTED_KEY: False,
+            session.PROXY_TOKEN_KEY: "test-token",
+            session.PROXY_PORT_KEY: 1234,
+        }.get(k)
+        url = (
+            "https://colab.research.google.com/notebooks/my_notebook.ipynb#scrollTo=abc"
+        )
+        assert (
+            await session.check_session_proxy_tool_fn(notebook_url=url, ctx=ctx)
+            is False
+        )
+        opened = mock_webbrowser.call_args[0][0]
+        assert "#scrollTo=" not in opened
+        assert "my_notebook.ipynb#mcpProxyToken=" in opened
+
+    @pytest.mark.asyncio
+    async def test_notebook_url_alt_domain(self, mock_webbrowser):
+        ctx = Mock()
+        ctx.get_state.side_effect = lambda k: {
+            session.FE_CONNECTED_KEY: False,
+            session.PROXY_TOKEN_KEY: "test-token",
+            session.PROXY_PORT_KEY: 1234,
+        }.get(k)
+        url = "https://colab.google.com/notebooks/my_notebook.ipynb"
+        assert (
+            await session.check_session_proxy_tool_fn(notebook_url=url, ctx=ctx)
+            is False
+        )
+        mock_webbrowser.assert_called_once()
+        assert mock_webbrowser.call_args[0][0].startswith(url)
+
+    @pytest.mark.asyncio
+    async def test_notebook_url_invalid_origin(self, mock_webbrowser):
+        ctx = Mock()
+        ctx.get_state.side_effect = lambda k: {
+            session.FE_CONNECTED_KEY: False,
+            session.PROXY_TOKEN_KEY: "test-token",
+            session.PROXY_PORT_KEY: 1234,
+        }.get(k)
+        with pytest.raises(ValueError, match="notebook_url must be"):
+            await session.check_session_proxy_tool_fn(
+                notebook_url="https://evil.com/notebook.ipynb", ctx=ctx
+            )
+        mock_webbrowser.assert_not_called()
 
 
 class TestColabProxyClient:
