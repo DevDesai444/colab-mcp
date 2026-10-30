@@ -28,7 +28,15 @@ from mcp.client.session import ClientSession
 from mcp.types import TextContent
 import webbrowser
 
-from colab_mcp.websocket_server import ColabWebSocketServer, COLAB, SCRATCH_PATH
+from urllib.parse import urlparse
+
+from colab_mcp.websocket_server import (
+    COLAB,
+    COLAB_ALT_DOMAIN,
+    ColabWebSocketServer,
+    SCRATCH_PATH,
+)
+
 
 UI_CONNECTION_TIMEOUT = 60.0  # secs
 
@@ -159,22 +167,29 @@ class ColabProxyMiddleware(Middleware):
             )
 
 
-async def check_session_proxy_tool_fn(ctx: Context = CurrentContext()) -> bool:
-    fe_connected = ctx.get_state(FE_CONNECTED_KEY)
+async def check_session_proxy_tool_fn(
+    notebook_url: str | None = None, ctx: Context = CurrentContext()
+) -> bool:
+    if ctx.get_state(FE_CONNECTED_KEY):
+        return True
+    url = f"{COLAB}{SCRATCH_PATH}"
+    if notebook_url:
+        parsed = urlparse(notebook_url)
+        if f"{parsed.scheme}://{parsed.netloc}" not in (COLAB, COLAB_ALT_DOMAIN):
+            raise ValueError(
+                f"notebook_url must be a {COLAB} or {COLAB_ALT_DOMAIN} URL"
+            )
+        url = notebook_url.split("#", 1)[0]
     token = ctx.get_state(PROXY_TOKEN_KEY)
     port = ctx.get_state(PROXY_PORT_KEY)
-    if fe_connected:
-        return True
-    webbrowser.open_new(
-        f"{COLAB}{SCRATCH_PATH}#mcpProxyToken={token}&mcpProxyPort={port}"
-    )
+    webbrowser.open_new(f"{url}#mcpProxyToken={token}&mcpProxyPort={port}")
     return False
 
 
 check_session_proxy_tool = Tool.from_function(
     fn=check_session_proxy_tool_fn,
     name=INJECTED_TOOL_NAME,
-    description="Opens a connection to a Google Colab browser session and unlocks notebook editing tools. Returns a boolean representing whether the connection attempt succeeded",
+    description="Opens a connection to a Google Colab browser session and unlocks notebook editing tools. Optionally takes a notebook_url (a colab.research.google.com or colab.google.com notebook link) to connect to an existing notebook instead of a new scratch notebook. The notebook_url is ignored if already connected. Returns a boolean representing whether the connection attempt succeeded",
 )
 
 
